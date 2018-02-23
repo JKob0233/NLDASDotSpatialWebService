@@ -4,6 +4,7 @@ using System.Linq;
 using System.Web;
 using NetTopologySuite.IO;
 using System.Collections;
+using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Web.Services;
@@ -18,6 +19,8 @@ using ProjNet.CoordinateSystems.Transformations;
 using GeoAPI.CoordinateSystems.Transformations;
 using GeoAPI.Geometries;
 using NetTopologySuite.Geometries;
+using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace PercentArea.Models
 {
@@ -33,34 +36,22 @@ namespace PercentArea.Models
             double squareArea = 0;//0.015625;
             double gridArea = 0;
             double polygonArea = 0;
+            /*
             ArrayList polys = new ArrayList();
             ArrayList squares = new ArrayList();
-            ArrayList overlap = new ArrayList();
+            ArrayList overlap = new ArrayList();*/
+            List<GeoAPI.Geometries.IGeometry> polys = new List<GeoAPI.Geometries.IGeometry>();
+            List<GeoAPI.Geometries.IGeometry> squares = new List<GeoAPI.Geometries.IGeometry>();
+            List<GeoAPI.Geometries.IGeometry> overlap = new List<GeoAPI.Geometries.IGeometry>();
             List<Object> infoTable = new List<Object>();
             
-            string gridfile = "";
+            //////////////
+            string gridfile = @"M:\DotSpatTopology\tests\NLDAS_Grid_Reference.shp";//"";
+            string gridproj = @"M:\DotSpatTopology\tests\NLDAS_Grid_Reference.prj";
+            //////////////
 
-            
-            string ending = polyfile + ".zip";
-            WebClient client = new WebClient();
-            client.DownloadFile("ftp://newftp.epa.gov/exposure/NHDV1/HUC12_Boundries/" + ending, @"M:\\TransientStorage\\" + ending);
-
-            string projfile = "";
-            ZipFile.ExtractToDirectory(@"M:\\TransientStorage\\" + ending, @"M:\\TransientStorage\\" + polyfile);
-            string unzippedLocation = (@"M:\\TransientStorage\\" + polyfile + "\\" + polyfile); //+ "\\NHDPlus" + polyfile + "\\Drainage");
-            foreach(string file in Directory.GetFiles(unzippedLocation))
-            {
-                if (Path.GetExtension(file).Equals(".shp"))
-                {
-                    polyfile = file;
-                }
-                else if (Path.GetExtension(file).Equals(".prj"))
-                {
-                    projfile = file;
-                }
-            }
-
-            string gridproj = "";
+            //This block is for getting and setting shapefiles for NLDAS Grid
+            /**
             client.DownloadFile("https://ldas.gsfc.nasa.gov/nldas/gis/NLDAS_Grid_Reference.zip", @"M:\\TransientStorage\\NLDAS.zip");
             ZipFile.ExtractToDirectory(@"M:\\TransientStorage\\NLDAS.zip", @"M:\\TransientStorage\\NLDAS");
             unzippedLocation = (@"M:\\TransientStorage\\NLDAS");
@@ -75,75 +66,113 @@ namespace PercentArea.Models
                     gridproj = file;
                 }
             }
-            client.Dispose();
-            
+            client.Dispose();**/
 
-            
-            string line = System.IO.File.ReadAllText(projfile);
 
-            string[] projParams = { "PARAMETER", @"PARAMETER[""false_easting"",0],", @"PARAMETER[""false_northing"",0],", @"PARAMETER[""central_meridian"",0],", @"PARAMETER[""standard_parallel_1"",0],", @"PARAMETER[""standard_parallel_2"",0],", @"PARAMETER[""latitude_Of_origin"",0]," };
-            int ptr = 0;
-            foreach (string x in projParams)
+            if (polyfile.EndsWith(".geojson"))
             {
-                if (line.Contains(x))
+                string jsonfile = System.IO.File.ReadAllText(polyfile);
+                var readera = new NetTopologySuite.IO.GeoJsonReader();
+                NetTopologySuite.Features.FeatureCollection result = readera.Read<NetTopologySuite.Features.FeatureCollection>(jsonfile);
+                for (int i = 0; i < result.Count; i++)
                 {
-                    ptr = line.IndexOf(x);
-                }
-                else if (!line.Contains(x) && !x.Equals("PARAMETER"))
-                {
-                    line = line.Insert(ptr, x);
+                    polys.Add(result[i].Geometry);
+                    polygonArea += result[i].Geometry.Area;
                 }
             }
-            string line2 = System.IO.File.ReadAllText(gridproj);
-
-
-            
-            IProjectedCoordinateSystem pcs = CoordinateSystemWktReader.Parse(line) as IProjectedCoordinateSystem;
-            IGeographicCoordinateSystem gcs = GeographicCoordinateSystem.WGS84 as IGeographicCoordinateSystem;
-
-            CoordinateTransformationFactory ctfac = new CoordinateTransformationFactory();
-            ICoordinateTransformation transformTo = ctfac.CreateFromCoordinateSystems(pcs, gcs);
-            IMathTransform inverseTransformTo = transformTo.MathTransform;
-
-            //Read geometries from both shapefiles and store in array lists
-            //As well as calculate shapefile areas ahead of time
-
-            
-            ShapefileDataReader reader = new ShapefileDataReader(polyfile, NetTopologySuite.Geometries.GeometryFactory.Default);
-            while (reader.Read())
+            else
             {
-                CoordinateList cordlist = new CoordinateList();
-                foreach (Coordinate coord in reader.Geometry.Coordinates)
+                string ending = polyfile + ".zip";
+                Guid gid = Guid.NewGuid();
+                string directory = @"M:\\TransientStorage\\" + gid.ToString() + "\\";
+                WebClient client = new WebClient();
+                DirectoryInfo di = Directory.CreateDirectory(directory);
+                client.DownloadFile("ftp://newftp.epa.gov/exposure/NHDV1/HUC12_Boundries/" + ending, directory + ending);
+
+                string projfile = "";
+
+
+                ZipFile.ExtractToDirectory(directory + ending, directory + polyfile);
+                string unzippedLocation = (directory + polyfile + "\\" + polyfile); //+ "\\NHDPlus" + polyfile + "\\Drainage");
+                foreach (string file in Directory.GetFiles(unzippedLocation))
                 {
-                    double[] newCoord = {coord.X, coord.Y};
-                    newCoord = inverseTransformTo.Transform(newCoord);
-                    Coordinate newpt = new Coordinate(newCoord[0], newCoord[1]);
-                    cordlist.Add(newpt);
+                    if (Path.GetExtension(file).Equals(".shp"))
+                    {
+                        polyfile = file;
+                    }
+                    else if (Path.GetExtension(file).Equals(".prj"))
+                    {
+                        projfile = file;
+                    }
                 }
-                Coordinate[] listofpts = cordlist.ToCoordinateArray();
-                IGeometryFactory geoFactory = new NetTopologySuite.Geometries.GeometryFactory();
-                NetTopologySuite.Geometries.LinearRing linear = (NetTopologySuite.Geometries.LinearRing)new GeometryFactory().CreateLinearRing(listofpts);
-                Polygon projPoly = new Polygon(linear, null, geoFactory);
-              
-                polys.Add(projPoly);
-                polygonArea += projPoly.Area;
-                //polys.Add(reader.Geometry);
-                //polygonArea += reader.Geometry.Area;
+
+                //This block is for setting projection parameters of input shapefile and projecting it to NLDAS grid
+                //Reprojecting of coordinates is not needed for NHDPlus V2
+
+                string line = System.IO.File.ReadAllText(projfile);
+                string[] projParams = { "PARAMETER", @"PARAMETER[""latitude_Of_origin"",0]," };//@"PARAMETER[""false_easting"",0],", @"PARAMETER[""false_northing"",0],", @"PARAMETER[""central_meridian"",0],", @"PARAMETER[""standard_parallel_1"",0],", @"PARAMETER[""standard_parallel_2"",0],", @"PARAMETER[""latitude_Of_origin"",0]," };
+                int ptr = 0;
+                foreach (string x in projParams)
+                {
+                    if (line.Contains(x))
+                    {
+                        ptr = line.IndexOf(x);
+                    }
+                    else if (!line.Contains(x) && !x.Equals("PARAMETER"))
+                    {
+                        line = line.Insert(ptr, x);
+                    }
+                }
+                string line2 = System.IO.File.ReadAllText(gridproj);
+
+                IProjectedCoordinateSystem pcs = CoordinateSystemWktReader.Parse(line) as IProjectedCoordinateSystem;
+                IGeographicCoordinateSystem gcs = GeographicCoordinateSystem.WGS84 as IGeographicCoordinateSystem;
+
+                CoordinateTransformationFactory ctfac = new CoordinateTransformationFactory();
+                ICoordinateTransformation transformTo = ctfac.CreateFromCoordinateSystems(pcs, gcs);
+                IMathTransform inverseTransformTo = transformTo.MathTransform;
+
+
+                //Read geometries from both shapefiles and store in array lists
+                //As well as calculate shapefile areas ahead of time
+                ShapefileDataReader reader = new ShapefileDataReader(polyfile, NetTopologySuite.Geometries.GeometryFactory.Default);
+                while (reader.Read())
+                {
+                    //Reprojection not needed for NHDPLUSV2
+                    CoordinateList cordlist = new CoordinateList();
+                    foreach (Coordinate coord in reader.Geometry.Coordinates)
+                    {
+                        double[] newCoord = {coord.X, coord.Y};
+                        newCoord = inverseTransformTo.Transform(newCoord);
+                        Coordinate newpt = new Coordinate(newCoord[0], newCoord[1]);
+                        cordlist.Add(newpt);
+                    }
+                    Coordinate[] listofpts = cordlist.ToCoordinateArray();
+                    IGeometryFactory geoFactory = new NetTopologySuite.Geometries.GeometryFactory();
+                    NetTopologySuite.Geometries.LinearRing linear = (NetTopologySuite.Geometries.LinearRing)new GeometryFactory().CreateLinearRing(listofpts);
+                    Polygon projPoly = new Polygon(linear, null, geoFactory);
+
+                    polys.Add(projPoly);
+                    polygonArea += projPoly.Area;
+                    //polys.Add(reader.Geometry);
+                    //polygonArea += reader.Geometry.Area;
+                }
+                reader.Dispose();
             }
-            
+                 
             ShapefileDataReader reader2 = new ShapefileDataReader(gridfile, NetTopologySuite.Geometries.GeometryFactory.Default);
             while (reader2.Read())
             {
                 squares.Add(reader2.Geometry);
                 gridArea += reader2.Geometry.Area;
             }
-            reader.Dispose();
+            
             reader2.Dispose();
 
-            squares.TrimToSize();
-            polys.TrimToSize();
+            Stopwatch timer = new Stopwatch();
+            timer.Start();
             
-            //Creating intersections ahead of time to make selections faster
+            //Creating intersections ahead of time to make selections faster ---Non Parallel    36-44 milliseconds
             foreach (GeoAPI.Geometries.IGeometry s in squares)
             {
                 foreach (GeoAPI.Geometries.IGeometry p in polys)
@@ -154,16 +183,27 @@ namespace PercentArea.Models
                     }
                 }
             }
-            overlap.TrimToSize();
-            ///
 
-            //Label1.Text = "Area of NLDAS Grid: " + gridArea.ToString();
-            //Label2.Text = "\r\nArea of polygon: " + polygonArea.ToString();
+            /*
+            object addLock = new object();//Creating intersections ahead of time to make selections faster ---Parallel    45-55 milliseconds, slower with lock
+            Parallel.ForEach(squares, (GeoAPI.Geometries.IGeometry s) =>
+                {                    
+                    Parallel.ForEach(polys, (GeoAPI.Geometries.IGeometry p) =>
+                    {
+                        if (p.Intersects(s) && !overlap.Contains(s))
+                        {
+                            overlap.Add(s);
+                        }
+                    });
+                });*/
+
+            timer.Stop();
+            TimeSpan ts = timer.Elapsed;
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}", ts.Hours, ts.Minutes, ts.Seconds, ts.Milliseconds / 10);
+            Debug.WriteLine("RunTime " + elapsedTime);
+            
             double percent = (polygonArea / gridArea) * 100;
-            //Label3.Text = "\r\nPolygon covers " + percent.ToString() + "% of NLDAS Grid.";
-
-
-
+            
             foreach (GeoAPI.Geometries.IGeometry s in overlap)
             {
                 double interArea = 0.0;
@@ -180,18 +220,20 @@ namespace PercentArea.Models
                 List<Object> item = new List<Object>() { s.Centroid.ToString(), squareArea, interArea, percent2 };
                 infoTable.Add(item);
             }
-            
-            System.IO.DirectoryInfo di = new DirectoryInfo(@"M:\\TransientStorage\\");
+            /*
+            System.IO.DirectoryInfo del = new DirectoryInfo(directory);
 
-            foreach (FileInfo file in di.GetFiles())
+            foreach (FileInfo file in del.GetFiles())
             {
                 file.Delete();
             }
-            foreach (DirectoryInfo dir in di.GetDirectories())
+            foreach (DirectoryInfo dir in del.GetDirectories())
             {
                 dir.Delete(true);
-            }
-            
+            }*/
+            /////
+            infoTable.Add(new List<Object>() { elapsedTime, elapsedTime, elapsedTime, elapsedTime });
+            //////
             return infoTable;
         }
     }

@@ -1,10 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading.Tasks;
+using System.Web;
 using System.Web.Http;
 
+//
+//
 namespace PercentArea.Controllers
 {
     public class GridCellController : ApiController
@@ -17,21 +22,72 @@ namespace PercentArea.Controllers
         }*/
 
         // GET api/GridCell/01020003            Method for taking catchment number
+        [HttpGet]
         [Route("api/GridCell/{id:length(8)}")]
         public List<Object> Get(string id)
         {
             Models.GridCell cell = new Models.GridCell();
             return cell.CalculateDataTable(id);
         }
+        
+        [HttpPost]
+        [Route("api/GridCell/")]
+        public Task<HttpResponseMessage> Post()
+        {
+            HttpRequestMessage request = this.Request;
+            if (!request.Content.IsMimeMultipartContent())
+            {
+                throw new HttpResponseException(HttpStatusCode.UnsupportedMediaType);
+            }
+            
+            var provider = new MultipartFormDataStreamProvider("M:\\TransientStorage");
 
-        //To be added later
+            var task = request.Content.ReadAsMultipartAsync(provider).
+                ContinueWith<HttpResponseMessage>(o =>
+                {
+                    string output = "";
+                    foreach (MultipartFileData file in provider.FileData)
+                    {
+                        string fileName = file.Headers.ContentDisposition.FileName;
+                        if (fileName.StartsWith("\"") && fileName.EndsWith("\""))
+                        {
+                            fileName = fileName.Trim('"');
+                        }
+                        if (fileName.Contains(@"/") || fileName.Contains(@"\"))
+                        {
+                            fileName = Path.GetFileName(fileName);
+                        }
+                        Models.GridCell cell = new Models.GridCell();
+                        string geojson = provider.Contents.ToString();
+                        output = cell.CalculateDataTable(fileName).ToString();
+                    }
+                    // this is the file name on the server where the file was saved 
+
+                    return new HttpResponseMessage()
+                    {
+                        Content = new StringContent(output)
+                    };
+                }
+            );
+            return task;
+        }
+
+        /*
+        //POST api/GridCell/UserShapefile.zip   Method for taking zip file
+        [HttpPost]
+        [Route("api/GridCell/upload/{filename:regex([\\w\\-.]+)}")]//{id:regex([\\w\\-.]+)}
+        public List<Object> Post([FromBody]string filename)
+        {
+
+        }*/
+
         /*
         // GET api/GridCell/Shapefile           Method for taking zip file
         [Route("api/GridCell/{id:alpha}")]
         public List<Object> Get(string id)
         {
             Models.GridCell cell = new Models.GridCell();
-            return cell.ShapefileCalculation(id);
+            return cell.CalculateDataTable(id);
         }*/
     }
 }

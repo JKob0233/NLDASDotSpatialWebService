@@ -66,3 +66,5 @@ M:\PercentArea\PercentArea\bin\System.Web.Http.xml
 M:\PercentArea\PercentArea\bin\System.Web.Http.WebHost.xml
 M:\PercentArea\PercentArea\bin\System.IO.Compression.ZipFile.dll
 M:\PercentArea\PercentArea\bin\ProjNet.dll
+M:\PercentArea\PercentArea\bin\NetTopologySuite.IO.GeoJSON.dll
+M:\PercentArea\PercentArea\bin\NetTopologySuite.IO.GeoJSON.xml
