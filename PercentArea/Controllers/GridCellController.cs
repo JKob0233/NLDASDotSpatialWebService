@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,13 +15,6 @@ namespace PercentArea.Controllers
 {
     public class GridCellController : ApiController
     {
-        /* GET api/GridCell
-        public IEnumerable<Object> Get()
-        {
-            Models.GridCell cell = new Models.GridCell();
-            return cell.CalculateDataTable();
-        }*/
-
         // GET api/GridCell/01020003            Method for taking catchment number
         [HttpGet]
         [Route("api/GridCell/{id:length(8)}")]
@@ -29,10 +23,10 @@ namespace PercentArea.Controllers
             Models.GridCell cell = new Models.GridCell();
             return cell.CalculateDataTable(id);
         }
-        
+
         [HttpPost]
         [Route("api/GridCell/")]
-        public Task<HttpResponseMessage> Post()
+        public Task<HttpResponseMessage> Post()       //Method for taking .geojson
         {
             HttpRequestMessage request = this.Request;
             if (!request.Content.IsMimeMultipartContent())
@@ -58,8 +52,8 @@ namespace PercentArea.Controllers
                             fileName = Path.GetFileName(fileName);
                         }
                         Models.GridCell cell = new Models.GridCell();
-                        string geojson = provider.Contents.ToString();
-                        output = cell.CalculateDataTable(fileName).ToString();
+                        string geojson = System.IO.File.ReadAllText(file.LocalFileName).Replace("\n", "");//provider.Contents.ToString();
+                        output = JsonConvert.SerializeObject(cell.CalculateDataTable(geojson), Formatting.Indented);
                     }
                     // this is the file name on the server where the file was saved 
 
@@ -71,23 +65,5 @@ namespace PercentArea.Controllers
             );
             return task;
         }
-
-        /*
-        //POST api/GridCell/UserShapefile.zip   Method for taking zip file
-        [HttpPost]
-        [Route("api/GridCell/upload/{filename:regex([\\w\\-.]+)}")]//{id:regex([\\w\\-.]+)}
-        public List<Object> Post([FromBody]string filename)
-        {
-
-        }*/
-
-        /*
-        // GET api/GridCell/Shapefile           Method for taking zip file
-        [Route("api/GridCell/{id:alpha}")]
-        public List<Object> Get(string id)
-        {
-            Models.GridCell cell = new Models.GridCell();
-            return cell.CalculateDataTable(id);
-        }*/
     }
 }

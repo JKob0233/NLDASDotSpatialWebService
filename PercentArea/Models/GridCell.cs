@@ -21,34 +21,33 @@ using GeoAPI.Geometries;
 using NetTopologySuite.Geometries;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using System.Web.Script.Services;
+using Newtonsoft.Json;
+using NetTopologySuite.Features;
 
 namespace PercentArea.Models
 {
     public class GridCell
-    {
-        public GeoAPI.Geometries.Coordinate CellCentroidCoordinates { get; set; }
-        public double AreaOfCell { get; set; }
-        public double AreaOfPolygon { get; set; }
-        public double PercentAreaCoverage { get; set; }
-        
+    {        
         public List<Object> CalculateDataTable(string polyfile)
         {
+            //List<GeoAPI.Geometries.IGeometry> polys = new List<GeoAPI.Geometries.IGeometry>();
+            List<GeoAPI.Geometries.IGeometry> squares = new List<GeoAPI.Geometries.IGeometry>();
+            ArrayList polys = new ArrayList();
+            List<Object> infoTable = new List<Object>();
             double squareArea = 0;//0.015625;
             double gridArea = 0;
             double polygonArea = 0;
-            /*
-            ArrayList polys = new ArrayList();
-            ArrayList squares = new ArrayList();
-            ArrayList overlap = new ArrayList();*/
-            List<GeoAPI.Geometries.IGeometry> polys = new List<GeoAPI.Geometries.IGeometry>();
-            List<GeoAPI.Geometries.IGeometry> squares = new List<GeoAPI.Geometries.IGeometry>();
-            List<GeoAPI.Geometries.IGeometry> overlap = new List<GeoAPI.Geometries.IGeometry>();
-            List<Object> infoTable = new List<Object>();
-            
+            string catchmentID = "";
+
             //////////////
             string gridfile = @"M:\DotSpatTopology\tests\NLDAS_Grid_Reference.shp";//"";
             string gridproj = @"M:\DotSpatTopology\tests\NLDAS_Grid_Reference.prj";
             //////////////
+
+            Guid gid = Guid.NewGuid();
+            string directory = @"M:\\TransientStorage\\" + gid.ToString() + "\\";
+
 
             //This block is for getting and setting shapefiles for NLDAS Grid
             /**
@@ -69,28 +68,100 @@ namespace PercentArea.Models
             client.Dispose();**/
 
 
-            if (polyfile.EndsWith(".geojson"))
+            ShapefileDataReader reader2 = new ShapefileDataReader(gridfile, NetTopologySuite.Geometries.GeometryFactory.Default);
+            while (reader2.Read())
             {
-                string jsonfile = System.IO.File.ReadAllText(polyfile);
+                squares.Add(reader2.Geometry);
+                gridArea += reader2.Geometry.Area;
+            }
+
+            reader2.Dispose();
+
+
+
+            //if (polyfile.StartsWith(@"{""type"": ""FeatureCollection"""))
+            if (polyfile.StartsWith(@"{""type"":"))//.geojson
+            {
+                Boolean version1 = true;
+                string[] featureParams = new string[3];
+                string jsonfile = polyfile;
                 var readera = new NetTopologySuite.IO.GeoJsonReader();
                 NetTopologySuite.Features.FeatureCollection result = readera.Read<NetTopologySuite.Features.FeatureCollection>(jsonfile);
+                if (result[0].Attributes.GetNames().Contains("HUC_8"))
+                {
+                    version1 = false;
+                    featureParams[0] = "OBJECTID";
+                    featureParams[1] = "HUC_8";
+                    featureParams[2] = "HUC_12";
+                }
+                else if(result[0].Attributes.GetNames().Contains("HUC8"))
+                {
+                    version1 = true;
+                    featureParams[0] = "COMID";
+                    featureParams[1] = "HUC8";
+                    featureParams[2] = "HUC12";
+                }
+                else
+                {
+                    version1 = false;
+                    featureParams[0] = null;
+                    featureParams[1] = null;
+                    featureParams[2] = null;
+                }
+                
+
+                List<Object> huc8Table = new List<Object>();
+                huc8Table.Add(new KeyValuePair<string, string>("HUC 8 ID: ", result[0].Attributes[featureParams[1]].ToString()));
+                
                 for (int i = 0; i < result.Count; i++)
                 {
-                    polys.Add(result[i].Geometry);
-                    polygonArea += result[i].Geometry.Area;
+                    List<Object> huc12Table = new List<Object>();
+                    if (version1)
+                    {
+                        huc12Table.Add(new KeyValuePair<string, string>("HUC 12 ID: ", null));
+                    }
+                    else
+                    {
+                        huc12Table.Add(new KeyValuePair<string, string>("HUC 12 ID: ", result[i].Attributes["HUC_12"].ToString()));
+                    }
+                    
+                    catchmentID = result[i].Attributes[featureParams[0]].ToString();
+                    huc12Table.Add(new KeyValuePair<string, string>("Catchment ID: ", catchmentID));
+                    foreach (GeoAPI.Geometries.IGeometry s in squares)
+                    {
+                        double interArea = 0.0;
+                        squareArea = s.Area;
+                        if (result[i].Geometry.Intersects(s))
+                        {
+                            GeoAPI.Geometries.IGeometry intersection = result[i].Geometry.Intersection(s);
+                            interArea += intersection.Area;
+                            double percent2 = (interArea / squareArea) * 100;
+                            Dictionary<string, string> catchTable = new Dictionary<string, string>();
+                            //catchTable.Add("catchmentID", catchmentID);
+                            catchTable.Add("latitude", s.Centroid.X.ToString());
+                            catchTable.Add("longitude", s.Centroid.Y.ToString());
+                            catchTable.Add("cellArea", squareArea.ToString());
+                            catchTable.Add("containedArea", interArea.ToString());
+                            catchTable.Add("percentArea", percent2.ToString());
+                            huc12Table.Add(catchTable);
+                        }
+                        
+                    }
+                    huc8Table.Add(huc12Table);
                 }
+                infoTable.Add(huc8Table);
             }
-            else
+            else                                                    //Huc ID
             {
+                catchmentID = polyfile;
                 string ending = polyfile + ".zip";
-                Guid gid = Guid.NewGuid();
-                string directory = @"M:\\TransientStorage\\" + gid.ToString() + "\\";
+                
                 WebClient client = new WebClient();
                 DirectoryInfo di = Directory.CreateDirectory(directory);
                 client.DownloadFile("ftp://newftp.epa.gov/exposure/NHDV1/HUC12_Boundries/" + ending, directory + ending);
 
                 string projfile = "";
-
+                string dataFile = "";
 
                 ZipFile.ExtractToDirectory(directory + ending, directory + polyfile);
                 string unzippedLocation = (directory + polyfile + "\\" + polyfile); //+ "\\NHDPlus" + polyfile + "\\Drainage");
@@ -103,6 +174,10 @@ namespace PercentArea.Models
                     else if (Path.GetExtension(file).Equals(".prj"))
                     {
                         projfile = file;
+                    }
+                    else if (Path.GetExtension(file).Equals(".dbf"))
+                    {
+                        dataFile = file;
                     }
                 }
 
@@ -151,78 +226,48 @@ namespace PercentArea.Models
                     IGeometryFactory geoFactory = new NetTopologySuite.Geometries.GeometryFactory();
                     NetTopologySuite.Geometries.LinearRing linear = (NetTopologySuite.Geometries.LinearRing)new GeometryFactory().CreateLinearRing(listofpts);
                     Polygon projPoly = new Polygon(linear, null, geoFactory);
-
+                    
                     polys.Add(projPoly);
                     polygonArea += projPoly.Area;
-                    //polys.Add(reader.Geometry);
-                    //polygonArea += reader.Geometry.Area;
                 }
                 reader.Dispose();
-            }
-                 
-            ShapefileDataReader reader2 = new ShapefileDataReader(gridfile, NetTopologySuite.Geometries.GeometryFactory.Default);
-            while (reader2.Read())
-            {
-                squares.Add(reader2.Geometry);
-                gridArea += reader2.Geometry.Area;
-            }
-            
-            reader2.Dispose();
-
-            Stopwatch timer = new Stopwatch();
-            timer.Start();
-            
-            //Creating intersections ahead of time to make selections faster ---Non Parallel    36-44 milliseconds
-            foreach (GeoAPI.Geometries.IGeometry s in squares)
-            {
-                foreach (GeoAPI.Geometries.IGeometry p in polys)
+                
+                List<Object> huc8Table = new List<Object>();
+                huc8Table.Add(new KeyValuePair<string, string>("HUC 8 ID: ", catchmentID));
+                
+                foreach(Polygon p in polys)
                 {
-                    if (p.Intersects(s) && !overlap.Contains(s))
+                    List<Object> huc12Table = new List<Object>();
+                    huc12Table.Add(new KeyValuePair<string, string>("HUC 12 ID: ", null));
+                    catchmentID = null;//result[i].Attributes["OBJECTID"].ToString();
+                    huc12Table.Add(new KeyValuePair<string, string>("Catchment ID: ", catchmentID));
+                    foreach (GeoAPI.Geometries.IGeometry s in squares)
                     {
-                        overlap.Add(s);
-                    }
-                }
-            }
-
-            /*
-            object addLock = new object();//Creating intersections ahead of time to make selections faster ---Parallel    45-55 milliseconds, slower with lock
-            Parallel.ForEach(squares, (GeoAPI.Geometries.IGeometry s) =>
-                {                    
-                    Parallel.ForEach(polys, (GeoAPI.Geometries.IGeometry p) =>
-                    {
-                        if (p.Intersects(s) && !overlap.Contains(s))
+                        double interArea = 0.0;
+                        squareArea = s.Area;
+                        if (p.Intersects(s))
                         {
-                            overlap.Add(s);
+                            GeoAPI.Geometries.IGeometry intersection = p.Intersection(s);
+                            interArea += intersection.Area;
+                            double percent2 = (interArea / squareArea) * 100;
+                            Dictionary<string, string> catchTable = new Dictionary<string, string>();
+                            //catchTable.Add("catchmentID", catchmentID);
+                            catchTable.Add("latitude", s.Centroid.X.ToString());
+                            catchTable.Add("longitude", s.Centroid.Y.ToString());
+                            catchTable.Add("cellArea", squareArea.ToString());
+                            catchTable.Add("containedArea", interArea.ToString());
+                            catchTable.Add("percentArea", percent2.ToString());
+                            huc12Table.Add(catchTable);
                         }
-                    });
-                });*/
 
-            timer.Stop();
-            TimeSpan ts = timer.Elapsed;
-            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}", ts.Hours, ts.Minutes, ts.Seconds, ts.Milliseconds / 10);
-            Debug.WriteLine("RunTime " + elapsedTime);
-            
-            double percent = (polygonArea / gridArea) * 100;
-            
-            foreach (GeoAPI.Geometries.IGeometry s in overlap)
-            {
-                double interArea = 0.0;
-                squareArea = s.Area;
-                foreach (GeoAPI.Geometries.IGeometry p in polys)
-                {
-                    if (p.Intersects(s))
-                    {
-                        GeoAPI.Geometries.IGeometry intersection = p.Intersection(s);
-                        interArea += intersection.Area;
                     }
+                    huc8Table.Add(huc12Table);
                 }
-                double percent2 = (interArea / squareArea) * 100;
-                List<Object> item = new List<Object>() { s.Centroid.ToString(), squareArea, interArea, percent2 };
-                infoTable.Add(item);
+                infoTable.Add(huc8Table);
             }
-            /*
-            System.IO.DirectoryInfo del = new DirectoryInfo(directory);
 
+            //System.IO.DirectoryInfo del = new DirectoryInfo(directory);
+            /*
             foreach (FileInfo file in del.GetFiles())
             {
                 file.Delete();
@@ -231,9 +276,11 @@ namespace PercentArea.Models
             {
                 dir.Delete(true);
             }*/
+            //del.Delete(true);
             /////
-            infoTable.Add(new List<Object>() { elapsedTime, elapsedTime, elapsedTime, elapsedTime });
+            //infoTable.Add(new List<Object>() { elapsedTime, elapsedTime, elapsedTime, elapsedTime });
             //////
+
             return infoTable;
         }
     }
